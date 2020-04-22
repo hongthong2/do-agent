@@ -420,6 +420,7 @@ func (c *HTTPClient) Flush() error {
 
 	url := c.url()
 	log.Debug("sending metrics to %s", url)
+	fmt.Println(string(c.buf.Bytes()))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(c.buf.Bytes()))
 	if err != nil {
 		c.numConsecutiveFailures++
