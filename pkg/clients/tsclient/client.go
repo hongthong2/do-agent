@@ -262,6 +262,7 @@ func (c *HTTPClient) bootstrapFromMetadata() error {
 	}
 	log.Debug("auth token: %s", truncate(authToken, 5))
 
+	log.Debug("GETTING APP KEY")
 	appKey, err := c.GetAppKey(authToken)
 	if err != nil {
 		return err
@@ -407,7 +408,6 @@ func (c *HTTPClient) Flush() error {
 
 	if c.bootstrapRequired || c.numConsecutiveFailures > 60 {
 		if err := c.bootstrapFromMetadata(); err != nil {
-			log.Debug("BOOTSTRAP FAILURE")
 			c.numConsecutiveFailures++
 			return err
 		}
