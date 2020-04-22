@@ -382,6 +382,7 @@ func (c *HTTPClient) ResetWaitTimer() {
 
 // Flush sends the batch of metrics to wharf
 func (c *HTTPClient) Flush() error {
+	log.Debug("TEST")
 	now := time.Now()
 	if now.Sub(c.lastFlushAttempt) < c.WaitDuration() {
 		return ErrFlushTooFrequent
@@ -508,7 +509,6 @@ func (c *HTTPClient) GetAppKey(authToken string) (string, error) {
 	}
 
 	var appKey string
-	fmt.Println(string([]byte(body)))
 	err = json.Unmarshal([]byte(body), &appKey)
 	if err != nil {
 		return "", err
