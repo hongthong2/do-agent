@@ -382,7 +382,6 @@ func (c *HTTPClient) ResetWaitTimer() {
 
 // Flush sends the batch of metrics to wharf
 func (c *HTTPClient) Flush() error {
-	log.Debug("TEST")
 	now := time.Now()
 	if now.Sub(c.lastFlushAttempt) < c.WaitDuration() {
 		return ErrFlushTooFrequent
@@ -408,6 +407,7 @@ func (c *HTTPClient) Flush() error {
 
 	if c.bootstrapRequired || c.numConsecutiveFailures > 60 {
 		if err := c.bootstrapFromMetadata(); err != nil {
+			log.Debug("BOOTSTRAP FAILURE")
 			c.numConsecutiveFailures++
 			return err
 		}
