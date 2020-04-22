@@ -504,10 +504,11 @@ func (c *HTTPClient) GetAuthToken() (string, error) {
 func (c *HTTPClient) GetAppKey(authToken string) (string, error) {
 	body, err := c.httpGet(fmt.Sprintf("%s/v1/appkey/droplet-auth-token", c.radarEndpoint), authToken)
 	if err != nil {
-		fmt.Println(body)
-		log.Debug(err.Error())
 		return "", err
 	}
+
+	log.Debug("printing body")
+	log.Debug(body)
 
 	var appKey string
 	err = json.Unmarshal([]byte(body), &appKey)
