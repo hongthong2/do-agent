@@ -262,7 +262,6 @@ func (c *HTTPClient) bootstrapFromMetadata() error {
 	}
 	log.Debug("auth token: %s", truncate(authToken, 5))
 
-	log.Debug("GETTING APP KEY")
 	appKey, err := c.GetAppKey(authToken)
 	if err != nil {
 		return err
@@ -505,6 +504,8 @@ func (c *HTTPClient) GetAuthToken() (string, error) {
 func (c *HTTPClient) GetAppKey(authToken string) (string, error) {
 	body, err := c.httpGet(fmt.Sprintf("%s/v1/appkey/droplet-auth-token", c.radarEndpoint), authToken)
 	if err != nil {
+		fmt.Println(body)
+		log.Debug(err.Error())
 		return "", err
 	}
 
