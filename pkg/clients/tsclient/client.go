@@ -507,9 +507,6 @@ func (c *HTTPClient) GetAppKey(authToken string) (string, error) {
 		return "", err
 	}
 
-	log.Debug("printing body")
-	log.Debug(body)
-
 	var appKey string
 	err = json.Unmarshal([]byte(body), &appKey)
 	if err != nil {
