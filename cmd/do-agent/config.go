@@ -28,6 +28,8 @@ var (
 		targets                map[string]string
 		metadataURL            *url.URL
 		authURL                *url.URL
+		bearerToken            string
+		bearerTokenFile        string
 		sonarEndpoint          string
 		stdoutOnly             bool
 		debug                  bool
@@ -43,6 +45,7 @@ var (
 		defaultMaxMetricLength int
 		promAddr               string
 		topK                   int
+		scrapeTimeout          time.Duration
 	}
 
 	// additionalParams is a list of extra command line flags to append
@@ -59,7 +62,6 @@ const internalProxyURL = "http://169.254.169.254"
 const (
 	defaultAuthURL          = internalProxyURL
 	defaultSonarURL         = ""
-	defaultTimeout          = 2 * time.Second
 	defaultWebListenAddress = "127.0.0.1:9100"
 )
 
@@ -94,6 +96,12 @@ func init() {
 	kingpin.Flag("k8s-metrics-path", "enable DO Kubernetes metrics collection (this must be a DOKS metrics endpoint)").
 		StringVar(&config.kubernetes)
 
+	kingpin.Flag("bearer-token", "sets the `Authorization` header on every scrape request with the configured bearer token (mutually exclusive with `bearer-token-file`)").
+		StringVar(&config.bearerToken)
+
+	kingpin.Flag("bearer-token-file", "sets the `Authorization` header on every scrape request with the bearer token read from the configured file (mutually exclusive with `bearer-token`)").
+		StringVar(&config.bearerTokenFile)
+
 	kingpin.Flag("no-collector.processes", "disable processes cpu/memory collection").
 		Default("true").
 		BoolVar(&config.noProcesses)
@@ -124,6 +132,11 @@ func init() {
 		IntVar(&config.defaultMaxMetricLength)
 
 	kingpin.Flag("process-topk", "number of top processes to scrape").Default("30").IntVar(&config.topK)
+
+	kingpin.Flag("scrape-timeout", "timeout for scraping metrics").
+		Default("10s").
+		DurationVar(&config.scrapeTimeout)
+
 }
 
 func initConfig() {
@@ -144,6 +157,11 @@ func checkConfig() error {
 			return errors.Wrapf(err, "url for target %q is not valid", name)
 		}
 	}
+
+	if config.bearerTokenFile != "" && config.bearerToken != "" {
+		return errors.New("both mutually exclusive flags --bearer-token and --bearer-token-file set")
+	}
+
 	return nil
 }
 
@@ -245,7 +263,7 @@ func initCollectors() []prometheus.Collector {
 	}
 
 	if config.dbaas != "" {
-		k, err := collector.NewScraper("dodbaas", config.dbaas, nil, dbaasWhitelist, collector.WithTimeout(defaultTimeout))
+		k, err := collector.NewScraper("dodbaas", config.dbaas, nil, dbaasWhitelist, collector.WithTimeout(config.scrapeTimeout))
 		if err != nil {
 			log.Error("Failed to initialize DO DBaaS metrics collector: %+v", err)
 		} else {
@@ -254,7 +272,7 @@ func initCollectors() []prometheus.Collector {
 	}
 
 	if config.promAddr != "" {
-		k, err := collector.NewScraper("prometheus", config.promAddr, nil, nil, collector.WithTimeout(defaultTimeout))
+		k, err := collector.NewScraper("prometheus", config.promAddr, nil, nil, collector.WithTimeout(config.scrapeTimeout))
 		if err != nil {
 			log.Error("Failed to initialize generic metrics collector: %+v", err)
 		} else {
@@ -282,7 +300,20 @@ func initCollectors() []prometheus.Collector {
 
 // appendKubernetesCollectors appends a kubernetes metrics collector if it can be initialized successfully
 func appendKubernetesCollectors(cols []prometheus.Collector) []prometheus.Collector {
-	k, err := collector.NewScraper("dokubernetes", config.kubernetes, nil, k8sWhitelist, collector.WithTimeout(defaultTimeout), collector.WithLogLevel(log.LevelDebug))
+	opts := []collector.Option{
+		collector.WithTimeout(config.scrapeTimeout),
+		collector.WithLogLevel(log.LevelDebug),
+	}
+
+	if config.bearerToken != "" {
+		opts = append(opts, collector.WithBearerToken(config.bearerToken))
+	}
+
+	if config.bearerTokenFile != "" {
+		opts = append(opts, collector.WithBearerTokenFile(config.bearerTokenFile))
+	}
+
+	k, err := collector.NewScraper("dokubernetes", config.kubernetes, nil, k8sWhitelist, opts...)
 	if err != nil {
 		log.Error("Failed to initialize DO Kubernetes metrics: %+v", err)
 		return cols

@@ -23,8 +23,6 @@ TAG=${TAG:-do-agent-uat-${USER}}
 declare -A SUPPORTED_IMAGES
 SUPPORTED_IMAGES["debian-9-x64"]="45446272"
 SUPPORTED_IMAGES["debian-10-x64"]="69440038"
-SUPPORTED_IMAGES["centos-6-x32"]="45446354"
-SUPPORTED_IMAGES["centos-6-x64"]="45446243"
 SUPPORTED_IMAGES["centos-7-x64"]="45446241"
 SUPPORTED_IMAGES["centos-8-x64"]="69439535"
 SUPPORTED_IMAGES["fedora-30-x64"]="46617047"
@@ -34,7 +32,10 @@ SUPPORTED_IMAGES["ubuntu-16-04-x64"]="45446373"
 SUPPORTED_IMAGES["ubuntu-18-04-x64"]="45446242"
 SUPPORTED_IMAGES["ubuntu-20-04-x64"]="62569011"
 
-SNYDER_SSH_FINGERPRINT="47:31:9b:8b:87:a7:2d:26:79:17:87:83:53:65:d4:b4"
+declare -a SSH_FINGERPRINTS=(
+"4c:3d:0d:94:25:ba:00:b0:88:9f:d2:cc:97:8e:8f:43"
+"47:31:9b:8b:87:a7:2d:26:79:17:87:83:53:65:d4:b4"
+)
 
 function main() {
 	cmd=${1:-}
@@ -366,9 +367,7 @@ function create_image() {
 		"region": "nyc3",
 		"size": "s-1vcpu-1gb",
 		"image": "${image_id}",
-		"ssh_keys": [
-			"${SNYDER_SSH_FINGERPRINT}"
-		],
+		"ssh_keys": $(printf "\"%s\"" "${SSH_FINGERPRINTS[@]}" | jq -s '.'),
 		"backups": false,
 		"ipv6": false,
 		"tags": [ "${TAG}", "agent-testing" ]

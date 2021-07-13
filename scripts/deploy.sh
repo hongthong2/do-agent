@@ -368,7 +368,6 @@ function check_can_promote_github() {
 	force_release_enabled && return 0
 	announce "Checking the state of Github release $VERSION"
 	github_curl \
-		--fail \
 		-D /dev/stderr \
 		"$(github_release_url)" \
 		| jq -r '. | select(.prerelease == true) | "Found Release: \(.url)"' \
@@ -385,12 +384,11 @@ function promote_github() {
 
 	announce "Removing prerelease flag from '$VERSION' on Github"
 	github_curl \
-		--fail \
 		-i \
 		-X PATCH \
 		--data-binary '{"prerelease":false}' \
 		"$(github_release_url)" \
-		| grep 'HTTP/1.1'
+		| grep 'HTTP/'
 }
 
 function check_can_promote_docker() {
@@ -443,7 +441,7 @@ function promote_docker() {
 function http_status_for() {
 	url=${1:-}
 	[ -z "$url" ] && abort "Usage: ${FUNCNAME[0]} <url>"
-	curl -LISsL "$url" | grep 'HTTP/1.1' | awk '{ print $2 }'
+	curl -LISsL "$url" | grep 'HTTP/' | awk '{ print $2 }'
 }
 
 # print the content type header for the provided file
@@ -470,7 +468,6 @@ function github_asset_upload_url() {
 # get the base release url for VERSION
 function github_release_url() {
 	github_curl \
-		--fail \
 		"https://api.github.com/repos/digitalocean/do-agent/releases/tags/$VERSION" \
 		| jq -r '.url' \
 		| grep .
@@ -575,7 +572,6 @@ function quiet_docker_pull() {
 function github_curl() {
 	# if user and token are empty then bash will exit because of unbound vars
 	curl -SsL \
-		--fail \
 		-u "${GITHUB_AUTH_USER}:${GITHUB_AUTH_TOKEN}" \
 		"$@"
 }
@@ -632,12 +628,14 @@ function purge_repo_cache() {
 	EOF
 	)
 
-	curl -X DELETE \
+	curl -v -X DELETE \
 		-D /dev/stderr \
 		-H "Content-Type: application/json" \
 		-H "Authorization: Bearer ${DO_API_TOKEN}" \
 		--data-binary "${payload}" \
 		"https://api.digitalocean.com/v2/cdn/endpoints/${DO_SPACE_ID}/cache"
+
+	announce "Cache Purge Complete"
 }
 
 # send a slack notification or fallback to STDERR
