@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"os"
 	"strings"
@@ -38,6 +39,7 @@ var (
 		noNode                 bool
 		kubernetes             string
 		dbaas                  string
+		mongodb                string
 		webListenAddress       string
 		webListen              bool
 		additionalLabels       []string
@@ -63,6 +65,8 @@ const (
 	defaultAuthURL          = internalProxyURL
 	defaultSonarURL         = ""
 	defaultWebListenAddress = "127.0.0.1:9100"
+
+	processScrapingDropletPct = 50
 )
 
 var defaultMetadataURL = fmt.Sprintf("%s/metadata", internalProxyURL)
@@ -112,6 +116,9 @@ func init() {
 
 	kingpin.Flag("dbaas-metrics-path", "enable DO DBAAS metrics collection (this must be a DO DBAAS metrics endpoint)").
 		StringVar(&config.dbaas)
+
+	kingpin.Flag("mongodb-metrics-path", "enable DO DBAAS MongoDB metrics collection (this must be a DO DBAAS metrics endpoint)").
+		StringVar(&config.mongodb)
 
 	kingpin.Flag("metrics-path", "enable metrics collection from a prometheus endpoint").
 		StringVar(&config.promAddr)
@@ -165,6 +172,24 @@ func checkConfig() error {
 	return nil
 }
 
+func toggleGradualRollouts() {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return
+	}
+
+	hash := fnv.New64a()
+	_, err = hash.Write([]byte(hostname))
+	if err != nil {
+		return
+	}
+
+	if hash.Sum64()%100 <= processScrapingDropletPct {
+		log.Debug("Enabling process scraping")
+		config.noProcesses = false
+	}
+}
+
 func initWriter(wc *prometheus.CounterVec) (metricWriter, limiter) {
 	if config.stdoutOnly {
 		return writer.NewFile(os.Stdout, wc), &constThrottler{wait: 10 * time.Second}
@@ -207,6 +232,13 @@ func initAggregatorSpecs() map[string][]string {
 		for k, v := range dbaasAggregationSpec {
 			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
 		}
+	}
+
+	if config.mongodb != "" {
+		for k, v := range mongoAggregationSpec {
+			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
+		}
+
 	}
 
 	if config.kubernetes != "" {
@@ -266,6 +298,15 @@ func initCollectors() []prometheus.Collector {
 		k, err := collector.NewScraper("dodbaas", config.dbaas, nil, dbaasWhitelist, collector.WithTimeout(config.scrapeTimeout))
 		if err != nil {
 			log.Error("Failed to initialize DO DBaaS metrics collector: %+v", err)
+		} else {
+			cols = append(cols, k)
+		}
+	}
+
+	if config.mongodb != "" {
+		k, err := collector.NewScraper("mongodb", config.mongodb, nil, dbaasWhitelist, collector.WithTimeout(config.scrapeTimeout))
+		if err != nil {
+			log.Error("Failed to initialize DO DBaaS MongoDB metrics collector: %+v", err)
 		} else {
 			cols = append(cols, k)
 		}
