@@ -10,8 +10,8 @@ import (
 
 type processCollector struct {
 	collectFn func(chan<- prometheus.Metric)
-	cpuTotal  *prometheus.Desc
 	rss       *prometheus.Desc
+	cpuTime   *prometheus.Desc
 }
 
 // NewProcessCollector returns a collector which exports the current state of
@@ -24,13 +24,18 @@ func NewProcessCollector() prometheus.Collector {
 			"Resident memory size in bytes.",
 			[]string{"process", "pid"}, nil,
 		),
+		cpuTime: prometheus.NewDesc(
+			"sonar_process_cpu_time_seconds",
+			"CPU time in seconds.",
+			[]string{"process", "pid"}, nil,
+		),
 	}
 
 	if _, err := procfs.NewStat(); err == nil {
 		c.collectFn = c.processCollect
 	} else {
 		// nop
-		c.collectFn = func(ch chan<- prometheus.Metric) {}
+		c.collectFn = func(_ chan<- prometheus.Metric) {}
 	}
 
 	return c
@@ -58,7 +63,7 @@ func (c *processCollector) processCollect(ch chan<- prometheus.Metric) {
 	}
 
 	for _, proc := range procs {
-		stat, err := proc.NewStat()
+		stat, err := proc.Stat()
 		if err != nil {
 			return
 		}
@@ -67,5 +72,6 @@ func (c *processCollector) processCollect(ch chan<- prometheus.Metric) {
 		pid := strconv.Itoa(stat.PID)
 
 		ch <- prometheus.MustNewConstMetric(c.rss, prometheus.GaugeValue, float64(stat.ResidentMemory()), name, pid)
+		ch <- prometheus.MustNewConstMetric(c.cpuTime, prometheus.GaugeValue, stat.CPUTime(), name, pid)
 	}
 }

@@ -8,7 +8,6 @@ server.
 Wharf responds with a rate-limit value which the client must wait that many seconds
 or longer before submitting the next batch of metrics -- this is exposed via the WaitDuration()
 method.
-
 */
 package tsclient
 
@@ -19,7 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -27,7 +26,6 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
-	"github.com/pkg/errors"
 
 	"github.com/digitalocean/do-agent/internal/log"
 	"github.com/digitalocean/do-agent/pkg/clients/tsclient/structuredstream"
@@ -191,6 +189,9 @@ func New(opts ...ClientOptFn) Client {
 	if opt.MaxBatchSize == 0 {
 		opt.MaxBatchSize = defaultMaxBatchSize
 	}
+	if opt.MaxBatchSize < 0 || opt.MaxBatchSize > math.MaxInt32 || opt.MaxMetricLength < 0 || opt.MaxMetricLength > math.MaxInt32 {
+		panic(fmt.Sprintf("metric limits must fit in int32: batch=%d length=%d", opt.MaxBatchSize, opt.MaxMetricLength))
+	}
 
 	var tlsConfig tls.Config
 	if opt.WharfEndpointSSLHostname != "" {
@@ -230,8 +231,8 @@ func New(opts ...ClientOptFn) Client {
 		appKey:                   opt.AppKey,
 		httpClient:               httpClient,
 		waitIntervalSeconds:      defaultWaitIntervalSeconds,
-		maxBatchSize:             int32(opt.MaxBatchSize),
-		maxMetricLength:          int32(opt.MaxMetricLength),
+		maxBatchSize:             int32(opt.MaxBatchSize),    //nolint:gosec // bounded to int32 above
+		maxMetricLength:          int32(opt.MaxMetricLength), //nolint:gosec // bounded to int32 above
 		bootstrapRequired:        true,
 		trusted:                  opt.IsTrusted,
 		lastSend:                 map[string]int64{},
@@ -342,13 +343,13 @@ func (c *HTTPClient) addMetricWithMSEpochTime(def *Definition, ms int64, value f
 	}
 	lfm, err := GetLFM(def, labels)
 	if err != nil {
-		return errors.Wrap(err, "failed to get LFM")
+		return fmt.Errorf("failed to get LFM: %w", err)
 	}
 
 	if !isZeroTime {
 		// ensure sufficient time between reported metric values
 		if lastSend, ok := c.lastSend[lfm]; ok && (time.Duration(ms-lastSend)*time.Millisecond) < c.WaitDuration() {
-			return errors.WithStack(ErrSendTooFrequent)
+			return ErrSendTooFrequent
 		}
 		c.lastSend[lfm] = ms
 	}
@@ -359,7 +360,7 @@ func (c *HTTPClient) addMetricWithMSEpochTime(def *Definition, ms int64, value f
 	writer.Write(value)
 	if err := writer.Error(); err != nil {
 		log.Error("failed to write: %+v", err)
-		return errors.WithStack(ErrWriteFailure)
+		return ErrWriteFailure
 	}
 	return nil
 }
@@ -551,14 +552,14 @@ func (c *HTTPClient) httpGet(url, authToken string) (string, error) {
 		return "", &UnexpectedHTTPStatusError{StatusCode: resp.StatusCode}
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	return string(body), nil
 }
 
-//{"success":true,"frequency":60,"max_metrics":1000,"max_lfm":512}
+// {"success":true,"frequency":60,"max_metrics":1000,"max_lfm":512}
 type sonarResponse struct {
 	Success          bool  `json:"success"`
 	FrequencySeconds int32 `json:"frequency"`

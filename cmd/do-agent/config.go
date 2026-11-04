@@ -1,19 +1,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/digitalocean/do-agent/internal/flags"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
-	"gopkg.in/alecthomas/kingpin.v2"
 
-	"github.com/digitalocean/do-agent/internal/flags"
 	"github.com/digitalocean/do-agent/internal/log"
 	"github.com/digitalocean/do-agent/internal/process"
 	"github.com/digitalocean/do-agent/pkg/clients/tsclient"
@@ -38,12 +39,15 @@ var (
 		noNode                 bool
 		kubernetes             string
 		dbaas                  string
+		mongodb                string
 		webListenAddress       string
 		webListen              bool
 		additionalLabels       []string
 		defaultMaxBatchSize    int
 		defaultMaxMetricLength int
 		promAddr               string
+		diMetricsPath          string
+		gpuMetricsPath         string
 		topK                   int
 		scrapeTimeout          time.Duration
 	}
@@ -63,6 +67,8 @@ const (
 	defaultAuthURL          = internalProxyURL
 	defaultSonarURL         = ""
 	defaultWebListenAddress = "127.0.0.1:9100"
+
+	processScrapingDropletPct = 50
 )
 
 var defaultMetadataURL = fmt.Sprintf("%s/metadata", internalProxyURL)
@@ -113,8 +119,17 @@ func init() {
 	kingpin.Flag("dbaas-metrics-path", "enable DO DBAAS metrics collection (this must be a DO DBAAS metrics endpoint)").
 		StringVar(&config.dbaas)
 
+	kingpin.Flag("mongodb-metrics-path", "enable DO DBAAS MongoDB metrics collection (this must be a DO DBAAS metrics endpoint)").
+		StringVar(&config.mongodb)
+
 	kingpin.Flag("metrics-path", "enable metrics collection from a prometheus endpoint").
 		StringVar(&config.promAddr)
+
+	kingpin.Flag("gpu-metrics-path", "enable GPU metrics collection from a prometheus endpoint (e.g., AMD device-metrics-exporter)").
+		StringVar(&config.gpuMetricsPath)
+
+	kingpin.Flag("di-metrics-path", "enable Dedicated Inference (DI) metrics collection from a prometheus endpoint").
+		StringVar(&config.diMetricsPath)
 
 	kingpin.Flag("web.listen", "enable a local endpoint for scrapeable prometheus metrics as well").
 		Default("false").
@@ -148,13 +163,14 @@ func initConfig() {
 	// parse all command line flags which are defined across the app
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
+
 }
 
 func checkConfig() error {
 	var err error
 	for name, uri := range config.targets {
 		if _, err = url.Parse(uri); err != nil {
-			return errors.Wrapf(err, "url for target %q is not valid", name)
+			return fmt.Errorf("url for target %q is not valid: %w", name, err)
 		}
 	}
 
@@ -163,6 +179,24 @@ func checkConfig() error {
 	}
 
 	return nil
+}
+
+func toggleGradualRollouts() {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return
+	}
+
+	hash := fnv.New64a()
+	_, err = hash.Write([]byte(hostname))
+	if err != nil {
+		return
+	}
+
+	if hash.Sum64()%100 <= processScrapingDropletPct {
+		log.Debug("Enabling process scraping")
+		config.noProcesses = false
+	}
 }
 
 func initWriter(wc *prometheus.CounterVec) (metricWriter, limiter) {
@@ -196,6 +230,7 @@ func initDecorator() decorate.Chain {
 
 // initAggregatorSpecs initializes the field aggregation specifications.
 // The map's key is the prometheus metric name to aggregate over, and the value is the label to aggregate away.
+// The metric name should be in the format expected after the decorators are applied, e.g., lowercase.
 func initAggregatorSpecs() map[string][]string {
 	aggregateSpecs := make(map[string][]string)
 
@@ -209,12 +244,29 @@ func initAggregatorSpecs() map[string][]string {
 		}
 	}
 
+	if config.mongodb != "" {
+		for k, v := range mongoAggregationSpec {
+			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
+		}
+
+	}
+
 	if config.kubernetes != "" {
 		for k, v := range k8sAggregationSpec {
 			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
 		}
 	}
 
+	if config.gpuMetricsPath != "" {
+		for k, v := range gpuAggregationSpec {
+			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
+		}
+	}
+	if config.diMetricsPath != "" {
+		for k, v := range diAggregationSpec {
+			aggregateSpecs[k] = append(aggregateSpecs[k], v...)
+		}
+	}
 	return aggregateSpecs
 }
 
@@ -271,12 +323,39 @@ func initCollectors() []prometheus.Collector {
 		}
 	}
 
+	if config.mongodb != "" {
+		k, err := collector.NewScraper("mongodb", config.mongodb, nil, dbaasWhitelist, collector.WithTimeout(config.scrapeTimeout))
+		if err != nil {
+			log.Error("Failed to initialize DO DBaaS MongoDB metrics collector: %+v", err)
+		} else {
+			cols = append(cols, k)
+		}
+	}
+
 	if config.promAddr != "" {
 		k, err := collector.NewScraper("prometheus", config.promAddr, nil, nil, collector.WithTimeout(config.scrapeTimeout))
 		if err != nil {
 			log.Error("Failed to initialize generic metrics collector: %+v", err)
 		} else {
 			cols = append(cols, k)
+		}
+	}
+
+	if config.diMetricsPath != "" {
+		di, err := collector.NewScraper("di", config.diMetricsPath, nil, diWhitelist, collector.WithTimeout(config.scrapeTimeout))
+		if err != nil {
+			log.Error("Failed to initialize DI metrics collector: %+v", err)
+		} else {
+			cols = append(cols, di)
+		}
+	}
+
+	if config.gpuMetricsPath != "" {
+		gpu, err := collector.NewScraper("gpu", config.gpuMetricsPath, nil, gpuWhitelist, collector.WithTimeout(config.scrapeTimeout))
+		if err != nil {
+			log.Error("Failed to initialize GPU metrics collector: %+v", err)
+		} else {
+			cols = append(cols, gpu)
 		}
 	}
 
@@ -345,7 +424,7 @@ func disableCollectorFlag(name string) string {
 }
 
 func convertToLabelPairs(s []string) []*dto.LabelPair {
-	l := []*dto.LabelPair{}
+	l := make([]*dto.LabelPair, 0, len(s))
 	for _, lbl := range s {
 		vals := strings.SplitN(lbl, ":", 2)
 		if len(vals) != 2 { // require a key value pair

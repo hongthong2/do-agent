@@ -16,7 +16,6 @@ package bcache
 import (
 	"bufio"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -51,8 +50,8 @@ func NewFS(mountPoint string) (FS, error) {
 	return FS{&fs}, nil
 }
 
-// Stats is a wrapper around stats()
-// It returns full available statistics
+// Stats is a wrapper around stats().
+// It returns full available statistics.
 func (fs FS) Stats() ([]*Stats, error) {
 	return fs.stats(true)
 }
@@ -197,14 +196,18 @@ func (p *parser) setSubDir(pathElements ...string) {
 	p.currentDir = path.Join(p.uuidPath, p.subDir)
 }
 
+// readValues reads a number of numerical values into an uint64 slice.
+// Non-existing files are ignored.
 func (p *parser) readValue(fileName string) uint64 {
 	if p.err != nil {
 		return 0
 	}
 	path := path.Join(p.currentDir, fileName)
-	byt, err := ioutil.ReadFile(path)
+	byt, err := os.ReadFile(path)
 	if err != nil {
-		p.err = fmt.Errorf("failed to read: %s", path)
+		if !os.IsNotExist(err) {
+			p.err = fmt.Errorf("failed to read: %s", path)
+		}
 		return 0
 	}
 	// Remove trailing newline.
@@ -329,12 +332,12 @@ func (p *parser) getPriorityStats() PriorityStats {
 	for scanner.Scan() {
 		err = parsePriorityStats(scanner.Text(), &res)
 		if err != nil {
-			p.err = fmt.Errorf("failed to parse: %s (%s)", path, err)
+			p.err = fmt.Errorf("failed to parse path %q: %w", path, err)
 			return res
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		p.err = fmt.Errorf("failed to parse: %s (%s)", path, err)
+		p.err = fmt.Errorf("failed to parse path %q: %w", path, err)
 		return res
 	}
 	return res
@@ -358,12 +361,12 @@ func (p *parser) getWritebackRateDebug() WritebackRateDebugStats {
 	for scanner.Scan() {
 		err = parseWritebackRateDebug(scanner.Text(), &res)
 		if err != nil {
-			p.err = fmt.Errorf("failed to parse: %s (%s)", path, err)
+			p.err = fmt.Errorf("failed to parse path %q: %w", path, err)
 			return res
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		p.err = fmt.Errorf("failed to parse: %s (%s)", path, err)
+		p.err = fmt.Errorf("failed to parse path %q: %w", path, err)
 		return res
 	}
 	return res
@@ -459,7 +462,7 @@ func GetStats(uuidPath string, priorityStats bool) (*Stats, error) {
 		bds.FiveMin.CacheReadaheads = par.readValue("cache_readaheads")
 
 		// dir <uuidPath>/<bds.Name>/stats_total
-		par.setSubDir("stats_total")
+		par.setSubDir(bds.Name, "stats_total")
 		bds.Total.Bypassed = par.readValue("bypassed")
 		bds.Total.CacheBypassHits = par.readValue("cache_bypass_hits")
 		bds.Total.CacheBypassMisses = par.readValue("cache_bypass_misses")

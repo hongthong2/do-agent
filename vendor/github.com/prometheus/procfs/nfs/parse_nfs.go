@@ -22,7 +22,7 @@ import (
 	"github.com/prometheus/procfs/internal/util"
 )
 
-// ParseClientRPCStats returns stats read from /proc/net/rpc/nfs
+// ParseClientRPCStats returns stats read from /proc/net/rpc/nfs.
 func ParseClientRPCStats(r io.Reader) (*ClientRPCStats, error) {
 	stats := &ClientRPCStats{}
 
@@ -37,7 +37,7 @@ func ParseClientRPCStats(r io.Reader) (*ClientRPCStats, error) {
 
 		values, err := util.ParseUint64s(parts[1:])
 		if err != nil {
-			return nil, fmt.Errorf("error parsing NFS metric line: %s", err)
+			return nil, fmt.Errorf("error parsing NFS metric line: %w", err)
 		}
 
 		switch metricLine := parts[0]; metricLine {
@@ -55,12 +55,12 @@ func ParseClientRPCStats(r io.Reader) (*ClientRPCStats, error) {
 			return nil, fmt.Errorf("unknown NFS metric line %q", metricLine)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("errors parsing NFS metric line: %s", err)
+			return nil, fmt.Errorf("errors parsing NFS metric line: %w", err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error scanning NFS file: %s", err)
+		return nil, fmt.Errorf("error scanning NFS file: %w", err)
 	}
 
 	return stats, nil

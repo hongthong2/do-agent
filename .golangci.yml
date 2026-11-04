@@ -1,0 +1,44 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - dupl
+    - goconst
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - unused
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)\.go$
+        text: G404
+      - path: (.+)\.go$
+        text: G114
+    paths:
+      - .*_test.go
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - .*_test.go
+      - third_party$
+      - builtin$
+      - examples$
